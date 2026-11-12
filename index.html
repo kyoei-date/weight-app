@@ -53,6 +53,15 @@ details summary{cursor:pointer;font-size:14px}
 <div class="wrap">
 <h1>体重記録</h1>
 <div class="note" id="sync" style="margin:-8px 0 10px"></div>
+<div class="card" id="login" hidden>
+  <div style="font-weight:700;margin-bottom:8px">ログイン</div>
+  <div class="row">
+    <div><label for="em">メールアドレス</label><input type="email" id="em" autocomplete="username" style="width:240px;max-width:100%"></div>
+    <div><label for="pw">パスワード</label><input type="password" id="pw" autocomplete="current-password" style="width:180px;max-width:100%"></div>
+    <button class="p" id="loginBtn">ログイン</button>
+  </div>
+  <div class="msg" id="lmsg"></div>
+</div>
 
 <div class="card stats" id="stats"></div>
 
@@ -94,24 +103,21 @@ details summary{cursor:pointer;font-size:14px}
       <div><label for="bd">基準日</label><input type="date" id="bd"></div>
       <div><label for="tw">目標体重 (kg)</label><input type="number" id="tw" step="0.1"></div>
     </div>
-    <div class="note" style="margin-top:14px"><b>GitHub同期</b>（PC・スマホで同じ記録を共有）</div>
-    <div class="set">
-      <div><label for="ghO">ユーザー名</label><input id="ghO" autocomplete="off" autocapitalize="none"></div>
-      <div><label for="ghR">データ用リポジトリ名</label><input id="ghR" autocomplete="off" autocapitalize="none"></div>
-      <div><label for="ghP">ファイル名</label><input id="ghP" placeholder="data.json" autocapitalize="none"></div>
-      <div><label for="ghT">アクセストークン</label><input id="ghT" type="password" autocomplete="off"></div>
-    </div>
-    <div class="tools"><button id="syncNow">今すぐ同期</button></div>
+    <div class="note" style="margin-top:14px"><b>アカウント</b>：<span id="who">未ログイン</span></div>
+    <div class="tools"><button id="logoutBtn">ログアウト</button></div>
     <div class="tools">
       <button id="exp">CSVを書き出す</button>
       <button id="imp">CSVを取り込む</button>
       <input type="file" id="file" accept=".csv,text/csv" hidden>
     </div>
-    <div class="note">データはこの端末のブラウザと、上で設定したGitHubのデータ用リポジトリにのみ保存されます。アクセストークンはこの端末のブラウザ内にだけ保存されます。CSVは「日付,体重」の2列（例: 2026-11-12,77.70）です。</div>
+    <div class="note">記録はログイン中のアカウントのFirebase（Firestore）に保存され、同じアカウントでログインした端末間で自動的に同期されます。通信できないときも端末に保存され、復旧後に反映されます。CSVは「日付,体重」の2列（例: 2026-11-12,77.70）です。</div>
   </details>
 </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 (function(){
 'use strict';
@@ -214,7 +220,7 @@ $('save').onclick=function(){
   var d=$('d').value,w=parseFloat($('w').value);
   if(!d||isNaN(w)||w<20||w>300){msg('日付と体重（20〜300kg）を入力してください。');return;}
   var ex=st.entries[d]!==undefined;
-  st.entries[d]=Math.round(w*100)/100;st.dirty[d]=1;delete st.del[d];save();queueSync();
+  st.entries[d]=Math.round(w*100)/100;save();var ew={};ew[d]=st.entries[d];fsWrite({entries:ew});
   $('w').value='';msg(d.slice(5).replace('-','/')+' の体重 '+f(w)+'kg を'+(ex?'更新':'記録')+'しました。');
   renderAll();
 };
@@ -222,7 +228,7 @@ $('w').addEventListener('keydown',function(e){if(e.key==='Enter')$('save').click
 $('rows').onclick=function(e){
   var b=e.target.closest('button');if(!b)return;
   if(b.dataset.e){$('d').value=b.dataset.e;$('w').value=st.entries[b.dataset.e];$('w').focus();msg('値を修正して「記録する」を押してください。');}
-  if(b.dataset.x&&confirm(b.dataset.x+' の記録を削除しますか？')){delete st.entries[b.dataset.x];delete st.dirty[b.dataset.x];st.del[b.dataset.x]=1;save();renderAll();queueSync();}
+  if(b.dataset.x&&confirm(b.dataset.x+' の記録を削除しますか？')){var xk=b.dataset.x;delete st.entries[xk];save();renderAll();var ed={};ed[xk]=firebase.firestore.FieldValue.delete();fsWrite({entries:ed});}
 };
 $('more').onclick=function(){showAll=!showAll;renderRows();};
 $('range').onclick=function(e){var b=e.target.closest('button');if(!b)return;
@@ -230,7 +236,7 @@ $('range').onclick=function(e){var b=e.target.closest('button');if(!b)return;
   rangeDays=parseInt(b.dataset.r,10);drawChart();};
 // 設定
 function setCfg(){var a=parseFloat($('bw').value),t=parseFloat($('tw').value);
-  if(!isNaN(a))st.baseW=a;if(!isNaN(t))st.target=t;if($('bd').value)st.baseD=$('bd').value;st.cfgDirty=true;save();renderAll();queueSync();}
+  if(!isNaN(a))st.baseW=a;if(!isNaN(t))st.target=t;if($('bd').value)st.baseD=$('bd').value;save();renderAll();fsWrite({baseW:st.baseW,baseD:st.baseD,target:st.target});}
 ['bw','bd','tw'].forEach(function(i){$(i).onchange=setCfg;});
 // CSV
 $('exp').onclick=function(){
@@ -241,62 +247,69 @@ $('exp').onclick=function(){
 $('imp').onclick=function(){$('file').click();};
 $('file').onchange=function(){
   var fl=this.files[0];if(!fl)return;var r=new FileReader();
-  r.onload=function(){var n=0;String(r.result).replace(/^\ufeff/,'').split(/\r?\n/).forEach(function(l){
+  r.onload=function(){var n=0,imp={};String(r.result).replace(/^\ufeff/,'').split(/\r?\n/).forEach(function(l){
     var m=l.trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*,\s*([\d.]+)/);
-    if(m){var k=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'),w=parseFloat(m[4]);if(w>=20&&w<=300){st.entries[k]=w;st.dirty[k]=1;delete st.del[k];n++;}}});
-    save();renderAll();msg(n+'件を取り込みました。');queueSync();};
+    if(m){var k=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'),w=parseFloat(m[4]);if(w>=20&&w<=300){st.entries[k]=w;imp[k]=w;n++;}}});
+    save();renderAll();msg(n+'件を取り込みました。');if(n)fsWrite({entries:imp});};
   r.readAsText(fl,'UTF-8');this.value='';
 };
 
-// ---- GitHub同期 ----
-var GK='weightlog_gh',syncT=null,syncing=false;
-function ghc(){try{var o=JSON.parse(localStorage.getItem(GK));return o&&o.token&&o.owner&&o.repo?o:null;}catch(e){return null;}}
-function ghSave(){try{localStorage.setItem(GK,JSON.stringify({owner:$('ghO').value.trim(),repo:$('ghR').value.trim(),path:$('ghP').value.trim()||'data.json',token:$('ghT').value.trim()}));}catch(e){}}
-function ghLoad(){try{var o=JSON.parse(localStorage.getItem(GK))||{};$('ghO').value=o.owner||'';$('ghR').value=o.repo||'';$('ghP').value=o.path||'data.json';$('ghT').value=o.token||'';}catch(e){}}
+// ---- Firebase同期 ----
+var FCFG={"apiKey": "AIzaSyBWtchE0cVL66VyDXaxAzoxPVUpGW_iQzI", "authDomain": "weight-management-92c65.firebaseapp.com", "projectId": "weight-management-92c65", "storageBucket": "weight-management-92c65.firebasestorage.app", "messagingSenderId": "1071883701453", "appId": "1:1071883701453:web:bafa6df43f464aba162d84"};
+var SEEDDATA={"entries":{"2026-08-06":83.05,"2026-08-07":83.55,"2026-08-08":82.7,"2026-08-09":82.75,"2026-08-10":83.05,"2026-08-11":82.35,"2026-08-12":82.85,"2026-08-13":83.15,"2026-08-14":83.0,"2026-08-15":83.0,"2026-08-16":82.75,"2026-08-17":83.35,"2026-08-18":82.6,"2026-08-19":82.45,"2026-08-20":82.55,"2026-08-21":82.3,"2026-08-22":82.45,"2026-08-23":82.0,"2026-08-24":82.65,"2026-08-25":82.25,"2026-08-26":81.55,"2026-08-27":81.55,"2026-08-28":81.55,"2026-08-29":82.1,"2026-08-30":82.05,"2026-08-31":81.6,"2026-09-01":81.75,"2026-09-02":81.3,"2026-09-03":81.75,"2026-09-04":81.45,"2026-09-05":81.55,"2026-09-06":80.7,"2026-09-07":80.75,"2026-09-08":80.9,"2026-09-09":80.95,"2026-09-10":81.2,"2026-09-11":81.05,"2026-09-12":80.65,"2026-09-13":80.8,"2026-09-14":80.45,"2026-09-15":80.15,"2026-09-16":80.05,"2026-09-17":80.3,"2026-09-18":80.15,"2026-09-19":79.95,"2026-09-20":80.15,"2026-09-21":80.45,"2026-09-22":79.9,"2026-09-23":80.35,"2026-09-24":80.25,"2026-09-25":80.25,"2026-09-26":79.85,"2026-09-27":79.55,"2026-09-28":79.75,"2026-09-29":79.5,"2026-09-30":79.75,"2026-10-01":79.6,"2026-10-02":79.0,"2026-10-03":78.55,"2026-10-04":78.4,"2026-10-05":79.15,"2026-10-06":79.8,"2026-10-07":79.3,"2026-10-08":78.6,"2026-10-09":78.8,"2026-10-10":78.5,"2026-10-11":78.45,"2026-10-12":78.5,"2026-10-13":79.1,"2026-10-14":79.25,"2026-10-15":78.75,"2026-10-16":78.7,"2026-10-17":78.05,"2026-10-18":78.95,"2026-10-19":78.05,"2026-10-20":77.85,"2026-10-21":78.45,"2026-10-22":78.2,"2026-10-23":78.4,"2026-10-24":78.1,"2026-10-25":77.9,"2026-10-26":78.05,"2026-10-27":78.55,"2026-10-28":78.0,"2026-10-29":78.25,"2026-10-30":78.0,"2026-10-31":77.45,"2026-11-01":76.9,"2026-11-02":77.3,"2026-11-03":77.2,"2026-11-04":77.6,"2026-11-05":77.7,"2026-11-06":78.0,"2026-11-07":78.05,"2026-11-08":77.2,"2026-11-09":76.7,"2026-11-10":77.15,"2026-11-11":77.6,"2026-11-12":77.7},"baseW":83.55,"baseD":"2026-08-07","target":73};
+var fdb=null,fref=null,unsub=null;
 function setSync(t){$('sync').textContent=t;}
-function enc(s){return btoa(unescape(encodeURIComponent(s)));}
-function dec(s){return decodeURIComponent(escape(atob(s)));}
-function GH(g){return {'Authorization':'Bearer '+g.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};}
-function queueSync(ms){clearTimeout(syncT);syncT=setTimeout(sync,ms==null?800:ms);}
-async function sync(){
-  var g=ghc();
-  if(!g){setSync(Object.keys(st.dirty).length?'未同期（GitHub未設定）':'');return;}
-  if(syncing){queueSync(1500);return;}
-  syncing=true;setSync('同期中…');
-  try{
-    var url='https://api.github.com/repos/'+encodeURIComponent(g.owner)+'/'+encodeURIComponent(g.repo)+'/contents/'+g.path.split('/').map(encodeURIComponent).join('/');
-    for(var a=0;a<3;a++){
-      var r=await fetch(url,{headers:GH(g),cache:'no-store'}),sha=null,remote=null;
-      if(r.status===200){var j=await r.json();sha=j.sha;remote=JSON.parse(dec(j.content));}
-      else if(r.status===401||r.status===403){throw new Error('トークンまたは権限を確認してください');}
-      else if(r.status!==404){throw new Error('GitHub '+r.status);}
-      var m=(remote&&remote.entries)?remote:{entries:{},baseW:st.baseW,baseD:st.baseD,target:st.target};
-      var changed=!remote;
-      Object.keys(st.dirty).forEach(function(k){if(st.entries[k]!==undefined&&m.entries[k]!==st.entries[k]){m.entries[k]=st.entries[k];changed=true;}});
-      Object.keys(st.del).forEach(function(k){if(m.entries[k]!==undefined){delete m.entries[k];changed=true;}});
-      if(st.cfgDirty){m.baseW=st.baseW;m.baseD=st.baseD;m.target=st.target;changed=true;}
-      if(changed){
-        var body={message:'weight '+ymd(new Date()),content:enc(JSON.stringify(m))};if(sha)body.sha=sha;
-        var p=await fetch(url,{method:'PUT',headers:GH(g),body:JSON.stringify(body)});
-        if(p.status===409||p.status===422){continue;}
-        if(!p.ok)throw new Error('保存に失敗しました ('+p.status+')');
-      }
-      st.entries=m.entries;st.baseW=m.baseW;st.baseD=m.baseD;st.target=m.target;
-      st.dirty={};st.del={};st.cfgDirty=false;save();renderAll();
-      var t=new Date();setSync('同期済み '+t.getHours()+':'+String(t.getMinutes()).padStart(2,'0'));
-      syncing=false;return;
-    }
-    throw new Error('競合が解消できませんでした。もう一度お試しください');
-  }catch(e){setSync('同期失敗: '+e.message+'（記録はこの端末に保存済み）');}
-  syncing=false;
+function hhmm(){var t=new Date();return t.getHours()+':'+String(t.getMinutes()).padStart(2,'0');}
+function fsWrite(obj){
+  if(!fref){setSync('未ログインのため同期されていません（記録はこの端末に保存済み）');return;}
+  setSync('同期中…');
+  fref.set(obj,{merge:true}).then(function(){setSync('同期済み '+hhmm());}).catch(function(e){setSync('同期失敗: '+e.message+'（記録はこの端末に保存済み）');});
 }
-['ghO','ghR','ghP','ghT'].forEach(function(i){$(i).onchange=function(){ghSave();queueSync(0);};});
-$('syncNow').onclick=function(){ghSave();queueSync(0);};
-document.addEventListener('visibilitychange',function(){if(!document.hidden)queueSync(0);});
+function authMsg(c){
+  if(c==='auth/invalid-email')return 'メールアドレスの形式が正しくありません。';
+  if(c==='auth/network-request-failed')return '通信できません。接続を確認してください。';
+  if(c==='auth/too-many-requests')return '試行回数が多すぎます。しばらくしてからお試しください。';
+  return 'メールアドレスまたはパスワードが違います。';
+}
+function initAuth(){
+  try{firebase.initializeApp(FCFG);}catch(e){setSync('Firebaseの初期化に失敗しました: '+e.message);return;}
+  var auth=firebase.auth();fdb=firebase.firestore();
+  try{fdb.enablePersistence({synchronizeTabs:true}).catch(function(){});}catch(e){}
+  auth.onAuthStateChanged(function(u){
+    if(unsub){unsub();unsub=null;}
+    if(!u){fref=null;$('login').hidden=false;$('who').textContent='未ログイン';setSync('');return;}
+    $('login').hidden=true;$('who').textContent=u.email;
+    fref=fdb.collection('users').doc(u.uid).collection('data').doc('weight');
+    setSync('同期中…');
+    unsub=fref.onSnapshot(function(s){
+      if(!s.exists){
+        var has=Object.keys(st.entries).length>0;
+        fref.set(has?{entries:st.entries,baseW:st.baseW,baseD:st.baseD,target:st.target}:SEEDDATA);
+        return;
+      }
+      var d=s.data();
+      st.entries=d.entries||{};
+      if(typeof d.baseW==='number')st.baseW=d.baseW;
+      if(d.baseD)st.baseD=d.baseD;
+      if(typeof d.target==='number')st.target=d.target;
+      save();renderAll();
+      setSync(s.metadata.hasPendingWrites?'同期中…':'同期済み '+hhmm());
+    },function(e){setSync('同期失敗: '+e.message);});
+  });
+  function login(){
+    var em=$('em').value.trim(),pw=$('pw').value;
+    if(!em||!pw){$('lmsg').textContent='メールアドレスとパスワードを入力してください。';return;}
+    $('lmsg').textContent='ログイン中…';
+    auth.signInWithEmailAndPassword(em,pw).then(function(){$('lmsg').textContent='';$('pw').value='';}).catch(function(e){$('lmsg').textContent=authMsg(e.code);});
+  }
+  $('loginBtn').onclick=login;
+  $('pw').addEventListener('keydown',function(e){if(e.key==='Enter')login();});
+  $('logoutBtn').onclick=function(){if(confirm('ログアウトしますか？'))auth.signOut();};
+}
 
 window.addEventListener('resize',drawChart);
 if(window.matchMedia)window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',drawChart);
-load();ghLoad();renderAll();queueSync(0);
+load();renderAll();initAuth();
 })();
 </script>
 </body>
