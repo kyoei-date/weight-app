@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>体重記録</title>
+<style>
+:root{--bg:#f5f7f6;--card:#fff;--ink:#1d2b2a;--sub:#5f6f6d;--line:#dbe3e1;--acc:#0f766e;--acc2:#d97706;--ok:#0f766e;--ng:#b45309;--grid:#e6ecea}
+@media (prefers-color-scheme:dark){:root{--bg:#121918;--card:#1a2322;--ink:#e6efed;--sub:#9fb0ad;--line:#2b3836;--acc:#2dd4bf;--acc2:#fbbf24;--ok:#2dd4bf;--ng:#fbbf24;--grid:#243230}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;line-height:1.6;padding:16px;padding-bottom:40px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;margin:4px 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:600px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{padding:2px 4px}
+.stat .l{font-size:12px;color:var(--sub)}
+.stat .v{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:13px;font-weight:400;color:var(--sub);margin-left:2px}
+.ok{color:var(--ok)}.ng{color:var(--ng)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+label{display:block;font-size:12px;color:var(--sub);margin-bottom:2px}
+input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-height:42px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+#w{width:120px}
+button{font:inherit;cursor:pointer;border-radius:8px;min-height:42px;padding:0 14px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:700}
+@media (prefers-color-scheme:dark){button.p{color:#062b27}}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:8px}
+.seg button{border:0;border-radius:0;min-height:34px;padding:0 12px;font-size:13px}
+.seg button.on{background:var(--acc);color:#fff}
+@media (prefers-color-scheme:dark){.seg button.on{color:#062b27}}
+canvas{width:100%;height:260px;display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--sub);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:0;border-top:2px solid;vertical-align:middle;margin-right:4px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line);font-size:14px}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;color:var(--sub);font-weight:400}
+td button{min-height:30px;padding:0 8px;font-size:12px}
+.msg{font-size:13px;color:var(--sub);min-height:20px;margin-top:6px}
+details summary{cursor:pointer;font-size:14px}
+.set{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.set input{width:120px}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.note{font-size:12px;color:var(--sub);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>体重記録</h1>
+
+<div class="card stats" id="stats"></div>
+
+<div class="card">
+  <div class="row">
+    <div><label for="d">日付</label><input type="date" id="d"></div>
+    <div><label for="w">体重 (kg)</label><input type="number" id="w" step="0.05" inputmode="decimal" placeholder="77.50"></div>
+    <button class="p" id="save">記録する</button>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+
+<div class="card">
+  <div class="seg" id="range">
+    <button data-r="30" class="on">30日</button><button data-r="90">90日</button><button data-r="0">全期間</button>
+  </div>
+  <canvas id="c" role="img" aria-label="体重の推移グラフ"></canvas>
+  <div class="legend">
+    <span><i style="border-color:var(--sub)"></i>毎日の体重</span>
+    <span><i style="border-color:var(--acc)"></i>7日移動平均</span>
+    <span><i style="border-color:var(--acc2);border-top-style:dashed"></i>基準</span>
+    <span><i style="border-color:var(--ok);border-top-style:dotted"></i>目標</span>
+  </div>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>日付</th><th>体重</th><th>前日比</th><th>基準比</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="tools"><button id="more">すべて表示</button></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>設定・バックアップ</summary>
+    <div class="set">
+      <div><label for="bw">基準体重 (kg)</label><input type="number" id="bw" step="0.05"></div>
+      <div><label for="bd">基準日</label><input type="date" id="bd"></div>
+      <div><label for="tw">目標体重 (kg)</label><input type="number" id="tw" step="0.1"></div>
+    </div>
+    <div class="tools">
+      <button id="exp">CSVを書き出す</button>
+      <button id="imp">CSVを取り込む</button>
+      <input type="file" id="file" accept=".csv,text/csv" hidden>
+    </div>
+    <div class="note">データはこの端末のブラウザ内にのみ保存されます（サーバーへは送信しません）。ブラウザの閲覧データを消去すると記録も消えるため、時々CSVで書き出してください。CSVは「日付,体重」の2列（例: 2026-11-12,77.70）です。</div>
+  </details>
+</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var KEY='weightlog_v1';
+// 初期データ（開始日 → 連続した日の体重）
+var SEED={
+ "2026-08-06":[83.05,83.55,82.70,82.75,83.05,82.35,82.85,83.15,83.00,83.00,82.75,83.35,82.60,82.45,82.55,82.30,82.45,82.00,82.65,82.25,81.55,81.55,81.55,82.10,82.05,81.60],
+ "2026-09-01":[81.75,81.30,81.75,81.45,81.55,80.70,80.75,80.90,80.95,81.20,81.05,80.65,80.80,80.45,80.15,80.05,80.30,80.15,79.95,80.15,80.45,79.90,80.35,80.25,80.25,79.85,79.55,79.75,79.50,79.75],
+ "2026-10-01":[79.60,79.00,78.55,78.40,79.15,79.80,79.30,78.60,78.80,78.50,78.45,78.50,79.10,79.25,78.75,78.70,78.05,78.95,78.05,77.85,78.45,78.20,78.40,78.10,77.90,78.05,78.55,78.00,78.25,78.00,77.45],
+ "2026-11-01":[76.90,77.30,77.20,77.60,77.70,78.00,78.05,77.20,76.70,77.15,77.60,77.70]
+};
+function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function pd(s){var a=s.split('-').map(Number);return new Date(a[0],a[1]-1,a[2]);}
+function dayN(s){return Math.round(pd(s).getTime()/86400000);}
+function seedEntries(){var e={};Object.keys(SEED).forEach(function(k){var s=pd(k);SEED[k].forEach(function(v,i){var d=new Date(s.getFullYear(),s.getMonth(),s.getDate()+i);e[ymd(d)]=v;});});return e;}
+
+var st;
+function load(){
+  try{var r=localStorage.getItem(KEY);if(r){st=JSON.parse(r);}}catch(e){}
+  if(!st||!st.entries){st={entries:seedEntries(),baseW:83.55,baseD:'2026-08-07',target:73};save();}
+}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){msg('この環境では保存できません。CSVで書き出してください。');}}
+function $(id){return document.getElementById(id);}
+function msg(t){$('msg').textContent=t;}
+function f(n,p){return n.toFixed(p==null?2:p);}
+function sign(n,p){return (n>0?'+':'')+f(n,p);}
+function sorted(){return Object.keys(st.entries).sort();}
+
+// 7日移動平均（その日を含む直近7日間にある記録の平均）
+function ma(keys){
+  return keys.map(function(k){
+    var n=dayN(k),s=0,c=0;
+    keys.forEach(function(j){var m=dayN(j);if(m<=n&&m>n-7){s+=st.entries[j];c++;}});
+    return c?s/c:null;
+  });
+}
+
+function renderStats(){
+  var ks=sorted(),el=$('stats');
+  if(!ks.length){el.innerHTML='<div class="stat"><div class="l">記録がありません</div></div>';return;}
+  var last=ks[ks.length-1],lw=st.entries[last],mv=ma(ks),m7=mv[mv.length-1];
+  var fromBase=lw-st.baseW,toTarget=lw-st.target;
+  el.innerHTML=
+   '<div class="stat"><div class="l">最新 ('+last.slice(5).replace('-','/')+')</div><div class="v">'+f(lw)+'<small>kg</small></div></div>'+
+   '<div class="stat"><div class="l">基準からの変化</div><div class="v '+(fromBase<=0?'ok':'ng')+'">'+sign(fromBase)+'<small>kg</small></div></div>'+
+   '<div class="stat"><div class="l">目標まであと</div><div class="v">'+(toTarget>0?f(toTarget):'達成')+(toTarget>0?'<small>kg</small>':'')+'</div></div>'+
+   '<div class="stat"><div class="l">7日移動平均</div><div class="v">'+f(m7)+'<small>kg</small></div></div>';
+}
+
+var showAll=false;
+function renderRows(){
+  var ks=sorted().reverse(),out=[];
+  var lim=showAll?ks.length:14;
+  for(var i=0;i<Math.min(lim,ks.length);i++){
+    var k=ks[i],w=st.entries[k],prev=ks[i+1]!==undefined?st.entries[ks[i+1]]:null;
+    var dd=prev===null?'–':sign(w-prev);
+    var db=sign(w-st.baseW);
+    out.push('<tr><td>'+k.slice(5).replace('-','/')+'</td><td>'+f(w)+'</td><td class="'+(prev!==null&&w-prev<=0?'ok':'ng')+'">'+dd+'</td><td class="'+(w-st.baseW<=0?'ok':'ng')+'">'+db+'</td><td><button data-e="'+k+'">編集</button> <button data-x="'+k+'">削除</button></td></tr>');
+  }
+  $('rows').innerHTML=out.join('');
+  $('more').textContent=showAll?'直近14日のみ表示':'すべて表示';
+  $('more').style.display=ks.length>14?'':'none';
+}
+
+var rangeDays=30;
+function cv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+function drawChart(){
+  var c=$('c'),dpr=window.devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;
+  c.width=W*dpr;c.height=H*dpr;
+  var g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+  var ks=sorted();if(!ks.length)return;
+  var mv=ma(ks),all=ks.map(function(k,i){return{n:dayN(k),w:st.entries[k],m:mv[i]};});
+  var endN=all[all.length-1].n,startN=rangeDays?endN-rangeDays+1:all[0].n;
+  var pts=all.filter(function(p){return p.n>=startN;});
+  if(!pts.length)return;
+  if(!rangeDays)startN=pts[0].n;
+  var lo=Math.min(st.target,st.baseW>0?st.baseW:1e9,Math.min.apply(null,pts.map(function(p){return p.w;})))-0.8;
+  var hi=Math.max(st.baseW,Math.max.apply(null,pts.map(function(p){return p.w;})))+0.8;
+  var L=40,R=10,T=10,B=24,pw=W-L-R,ph=H-T-B,span=Math.max(endN-startN,1);
+  function X(n){return L+(n-startN)/span*pw;}
+  function Y(w){return T+(hi-w)/(hi-lo)*ph;}
+  g.font='11px sans-serif';g.textBaseline='middle';
+  var step=(hi-lo)>8?2:1;
+  g.strokeStyle=cv('--grid');g.fillStyle=cv('--sub');g.lineWidth=1;g.textAlign='right';
+  for(var y=Math.ceil(lo/step)*step;y<=hi;y+=step){g.beginPath();g.moveTo(L,Y(y));g.lineTo(W-R,Y(y));g.stroke();g.fillText(y,L-6,Y(y));}
+  g.textAlign='center';g.textBaseline='top';
+  var tick=Math.max(1,Math.ceil(span/5));
+  for(var n=startN;n<=endN;n+=tick){var q=new Date(1970,0,1+n);g.fillText((q.getMonth()+1)+'/'+q.getDate(),X(n),H-B+6);}
+  function hline(w,col,dash){if(w<lo||w>hi)return;g.save();g.strokeStyle=col;g.lineWidth=1.5;g.setLineDash(dash);g.beginPath();g.moveTo(L,Y(w));g.lineTo(W-R,Y(w));g.stroke();g.restore();}
+  hline(st.baseW,cv('--acc2'),[6,4]);hline(st.target,cv('--ok'),[2,3]);
+  g.lineJoin='round';
+  g.strokeStyle=cv('--sub');g.lineWidth=1.2;g.beginPath();
+  pts.forEach(function(p,i){i?g.lineTo(X(p.n),Y(p.w)):g.moveTo(X(p.n),Y(p.w));});g.stroke();
+  g.fillStyle=cv('--sub');pts.forEach(function(p){g.beginPath();g.arc(X(p.n),Y(p.w),2.5,0,7);g.fill();});
+  g.strokeStyle=cv('--acc');g.lineWidth=2.5;g.beginPath();
+  pts.forEach(function(p,i){i?g.lineTo(X(p.n),Y(p.m)):g.moveTo(X(p.n),Y(p.m));});g.stroke();
+}
+
+function renderAll(){renderStats();renderRows();drawChart();$('bw').value=st.baseW;$('bd').value=st.baseD;$('tw').value=st.target;}
+
+// 入力
+$('d').value=ymd(new Date());
+$('save').onclick=function(){
+  var d=$('d').value,w=parseFloat($('w').value);
+  if(!d||isNaN(w)||w<20||w>300){msg('日付と体重（20〜300kg）を入力してください。');return;}
+  var ex=st.entries[d]!==undefined;
+  st.entries[d]=Math.round(w*100)/100;save();
+  $('w').value='';msg(d.slice(5).replace('-','/')+' の体重 '+f(w)+'kg を'+(ex?'更新':'記録')+'しました。');
+  renderAll();
+};
+$('w').addEventListener('keydown',function(e){if(e.key==='Enter')$('save').click();});
+$('rows').onclick=function(e){
+  var b=e.target.closest('button');if(!b)return;
+  if(b.dataset.e){$('d').value=b.dataset.e;$('w').value=st.entries[b.dataset.e];$('w').focus();msg('値を修正して「記録する」を押してください。');}
+  if(b.dataset.x&&confirm(b.dataset.x+' の記録を削除しますか？')){delete st.entries[b.dataset.x];save();renderAll();}
+};
+$('more').onclick=function(){showAll=!showAll;renderRows();};
+$('range').onclick=function(e){var b=e.target.closest('button');if(!b)return;
+  [].forEach.call($('range').children,function(x){x.classList.remove('on');});b.classList.add('on');
+  rangeDays=parseInt(b.dataset.r,10);drawChart();};
+// 設定
+function setCfg(){var a=parseFloat($('bw').value),t=parseFloat($('tw').value);
+  if(!isNaN(a))st.baseW=a;if(!isNaN(t))st.target=t;if($('bd').value)st.baseD=$('bd').value;save();renderAll();}
+['bw','bd','tw'].forEach(function(i){$(i).onchange=setCfg;});
+// CSV
+$('exp').onclick=function(){
+  var t='日付,体重\r\n'+sorted().map(function(k){return k+','+st.entries[k];}).join('\r\n')+'\r\n';
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+t],{type:'text/csv'}));
+  a.download='weight_'+ymd(new Date())+'.csv';document.body.appendChild(a);a.click();a.remove();
+};
+$('imp').onclick=function(){$('file').click();};
+$('file').onchange=function(){
+  var fl=this.files[0];if(!fl)return;var r=new FileReader();
+  r.onload=function(){var n=0;String(r.result).replace(/^\ufeff/,'').split(/\r?\n/).forEach(function(l){
+    var m=l.trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*,\s*([\d.]+)/);
+    if(m){var k=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'),w=parseFloat(m[4]);if(w>=20&&w<=300){st.entries[k]=w;n++;}}});
+    save();renderAll();msg(n+'件を取り込みました。');};
+  r.readAsText(fl,'UTF-8');this.value='';
+};
+window.addEventListener('resize',drawChart);
+if(window.matchMedia)window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',drawChart);
+load();renderAll();
+})();
+</script>
+</body>
+</html>
