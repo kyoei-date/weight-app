@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>体重記録</title>
+<link rel="icon" href="data:,">
 <style>
 :root{--bg:#f5f7f6;--card:#fff;--ink:#1d2b2a;--sub:#5f6f6d;--line:#dbe3e1;--acc:#0f766e;--acc2:#d97706;--ok:#0f766e;--ng:#b45309;--grid:#e6ecea}
 @media (prefers-color-scheme:dark){:root{--bg:#121918;--card:#1a2322;--ink:#e6efed;--sub:#9fb0ad;--line:#2b3836;--acc:#2dd4bf;--acc2:#fbbf24;--ok:#2dd4bf;--ng:#fbbf24;--grid:#243230}}
@@ -51,6 +52,7 @@ details summary{cursor:pointer;font-size:14px}
 <body>
 <div class="wrap">
 <h1>体重記録</h1>
+<div class="note" id="sync" style="margin:-8px 0 10px"></div>
 
 <div class="card stats" id="stats"></div>
 
@@ -92,12 +94,20 @@ details summary{cursor:pointer;font-size:14px}
       <div><label for="bd">基準日</label><input type="date" id="bd"></div>
       <div><label for="tw">目標体重 (kg)</label><input type="number" id="tw" step="0.1"></div>
     </div>
+    <div class="note" style="margin-top:14px"><b>GitHub同期</b>（PC・スマホで同じ記録を共有）</div>
+    <div class="set">
+      <div><label for="ghO">ユーザー名</label><input id="ghO" autocomplete="off" autocapitalize="none"></div>
+      <div><label for="ghR">データ用リポジトリ名</label><input id="ghR" autocomplete="off" autocapitalize="none"></div>
+      <div><label for="ghP">ファイル名</label><input id="ghP" placeholder="data.json" autocapitalize="none"></div>
+      <div><label for="ghT">アクセストークン</label><input id="ghT" type="password" autocomplete="off"></div>
+    </div>
+    <div class="tools"><button id="syncNow">今すぐ同期</button></div>
     <div class="tools">
       <button id="exp">CSVを書き出す</button>
       <button id="imp">CSVを取り込む</button>
       <input type="file" id="file" accept=".csv,text/csv" hidden>
     </div>
-    <div class="note">データはこの端末のブラウザ内にのみ保存されます（サーバーへは送信しません）。ブラウザの閲覧データを消去すると記録も消えるため、時々CSVで書き出してください。CSVは「日付,体重」の2列（例: 2026-11-12,77.70）です。</div>
+    <div class="note">データはこの端末のブラウザと、上で設定したGitHubのデータ用リポジトリにのみ保存されます。アクセストークンはこの端末のブラウザ内にだけ保存されます。CSVは「日付,体重」の2列（例: 2026-11-12,77.70）です。</div>
   </details>
 </div>
 </div>
@@ -107,12 +117,7 @@ details summary{cursor:pointer;font-size:14px}
 'use strict';
 var KEY='weightlog_v1';
 // 初期データ（開始日 → 連続した日の体重）
-var SEED={
- "2026-08-06":[83.05,83.55,82.70,82.75,83.05,82.35,82.85,83.15,83.00,83.00,82.75,83.35,82.60,82.45,82.55,82.30,82.45,82.00,82.65,82.25,81.55,81.55,81.55,82.10,82.05,81.60],
- "2026-09-01":[81.75,81.30,81.75,81.45,81.55,80.70,80.75,80.90,80.95,81.20,81.05,80.65,80.80,80.45,80.15,80.05,80.30,80.15,79.95,80.15,80.45,79.90,80.35,80.25,80.25,79.85,79.55,79.75,79.50,79.75],
- "2026-10-01":[79.60,79.00,78.55,78.40,79.15,79.80,79.30,78.60,78.80,78.50,78.45,78.50,79.10,79.25,78.75,78.70,78.05,78.95,78.05,77.85,78.45,78.20,78.40,78.10,77.90,78.05,78.55,78.00,78.25,78.00,77.45],
- "2026-11-01":[76.90,77.30,77.20,77.60,77.70,78.00,78.05,77.20,76.70,77.15,77.60,77.70]
-};
+var SEED={};
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function pd(s){var a=s.split('-').map(Number);return new Date(a[0],a[1]-1,a[2]);}
 function dayN(s){return Math.round(pd(s).getTime()/86400000);}
@@ -121,7 +126,8 @@ function seedEntries(){var e={};Object.keys(SEED).forEach(function(k){var s=pd(k
 var st;
 function load(){
   try{var r=localStorage.getItem(KEY);if(r){st=JSON.parse(r);}}catch(e){}
-  if(!st||!st.entries){st={entries:seedEntries(),baseW:83.55,baseD:'2026-08-07',target:73};save();}
+  if(!st||!st.entries){st={entries:{},baseW:80,baseD:ymd(new Date()),target:70};}
+  st.dirty=st.dirty||{};st.del=st.del||{};st.cfgDirty=!!st.cfgDirty;save();
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){msg('この環境では保存できません。CSVで書き出してください。');}}
 function $(id){return document.getElementById(id);}
@@ -208,7 +214,7 @@ $('save').onclick=function(){
   var d=$('d').value,w=parseFloat($('w').value);
   if(!d||isNaN(w)||w<20||w>300){msg('日付と体重（20〜300kg）を入力してください。');return;}
   var ex=st.entries[d]!==undefined;
-  st.entries[d]=Math.round(w*100)/100;save();
+  st.entries[d]=Math.round(w*100)/100;st.dirty[d]=1;delete st.del[d];save();queueSync();
   $('w').value='';msg(d.slice(5).replace('-','/')+' の体重 '+f(w)+'kg を'+(ex?'更新':'記録')+'しました。');
   renderAll();
 };
@@ -216,7 +222,7 @@ $('w').addEventListener('keydown',function(e){if(e.key==='Enter')$('save').click
 $('rows').onclick=function(e){
   var b=e.target.closest('button');if(!b)return;
   if(b.dataset.e){$('d').value=b.dataset.e;$('w').value=st.entries[b.dataset.e];$('w').focus();msg('値を修正して「記録する」を押してください。');}
-  if(b.dataset.x&&confirm(b.dataset.x+' の記録を削除しますか？')){delete st.entries[b.dataset.x];save();renderAll();}
+  if(b.dataset.x&&confirm(b.dataset.x+' の記録を削除しますか？')){delete st.entries[b.dataset.x];delete st.dirty[b.dataset.x];st.del[b.dataset.x]=1;save();renderAll();queueSync();}
 };
 $('more').onclick=function(){showAll=!showAll;renderRows();};
 $('range').onclick=function(e){var b=e.target.closest('button');if(!b)return;
@@ -224,7 +230,7 @@ $('range').onclick=function(e){var b=e.target.closest('button');if(!b)return;
   rangeDays=parseInt(b.dataset.r,10);drawChart();};
 // 設定
 function setCfg(){var a=parseFloat($('bw').value),t=parseFloat($('tw').value);
-  if(!isNaN(a))st.baseW=a;if(!isNaN(t))st.target=t;if($('bd').value)st.baseD=$('bd').value;save();renderAll();}
+  if(!isNaN(a))st.baseW=a;if(!isNaN(t))st.target=t;if($('bd').value)st.baseD=$('bd').value;st.cfgDirty=true;save();renderAll();queueSync();}
 ['bw','bd','tw'].forEach(function(i){$(i).onchange=setCfg;});
 // CSV
 $('exp').onclick=function(){
@@ -237,13 +243,60 @@ $('file').onchange=function(){
   var fl=this.files[0];if(!fl)return;var r=new FileReader();
   r.onload=function(){var n=0;String(r.result).replace(/^\ufeff/,'').split(/\r?\n/).forEach(function(l){
     var m=l.trim().match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})\s*,\s*([\d.]+)/);
-    if(m){var k=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'),w=parseFloat(m[4]);if(w>=20&&w<=300){st.entries[k]=w;n++;}}});
-    save();renderAll();msg(n+'件を取り込みました。');};
+    if(m){var k=m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'),w=parseFloat(m[4]);if(w>=20&&w<=300){st.entries[k]=w;st.dirty[k]=1;delete st.del[k];n++;}}});
+    save();renderAll();msg(n+'件を取り込みました。');queueSync();};
   r.readAsText(fl,'UTF-8');this.value='';
 };
+
+// ---- GitHub同期 ----
+var GK='weightlog_gh',syncT=null,syncing=false;
+function ghc(){try{var o=JSON.parse(localStorage.getItem(GK));return o&&o.token&&o.owner&&o.repo?o:null;}catch(e){return null;}}
+function ghSave(){try{localStorage.setItem(GK,JSON.stringify({owner:$('ghO').value.trim(),repo:$('ghR').value.trim(),path:$('ghP').value.trim()||'data.json',token:$('ghT').value.trim()}));}catch(e){}}
+function ghLoad(){try{var o=JSON.parse(localStorage.getItem(GK))||{};$('ghO').value=o.owner||'';$('ghR').value=o.repo||'';$('ghP').value=o.path||'data.json';$('ghT').value=o.token||'';}catch(e){}}
+function setSync(t){$('sync').textContent=t;}
+function enc(s){return btoa(unescape(encodeURIComponent(s)));}
+function dec(s){return decodeURIComponent(escape(atob(s)));}
+function GH(g){return {'Authorization':'Bearer '+g.token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};}
+function queueSync(ms){clearTimeout(syncT);syncT=setTimeout(sync,ms==null?800:ms);}
+async function sync(){
+  var g=ghc();
+  if(!g){setSync(Object.keys(st.dirty).length?'未同期（GitHub未設定）':'');return;}
+  if(syncing){queueSync(1500);return;}
+  syncing=true;setSync('同期中…');
+  try{
+    var url='https://api.github.com/repos/'+encodeURIComponent(g.owner)+'/'+encodeURIComponent(g.repo)+'/contents/'+g.path.split('/').map(encodeURIComponent).join('/');
+    for(var a=0;a<3;a++){
+      var r=await fetch(url,{headers:GH(g),cache:'no-store'}),sha=null,remote=null;
+      if(r.status===200){var j=await r.json();sha=j.sha;remote=JSON.parse(dec(j.content));}
+      else if(r.status===401||r.status===403){throw new Error('トークンまたは権限を確認してください');}
+      else if(r.status!==404){throw new Error('GitHub '+r.status);}
+      var m=(remote&&remote.entries)?remote:{entries:{},baseW:st.baseW,baseD:st.baseD,target:st.target};
+      var changed=!remote;
+      Object.keys(st.dirty).forEach(function(k){if(st.entries[k]!==undefined&&m.entries[k]!==st.entries[k]){m.entries[k]=st.entries[k];changed=true;}});
+      Object.keys(st.del).forEach(function(k){if(m.entries[k]!==undefined){delete m.entries[k];changed=true;}});
+      if(st.cfgDirty){m.baseW=st.baseW;m.baseD=st.baseD;m.target=st.target;changed=true;}
+      if(changed){
+        var body={message:'weight '+ymd(new Date()),content:enc(JSON.stringify(m))};if(sha)body.sha=sha;
+        var p=await fetch(url,{method:'PUT',headers:GH(g),body:JSON.stringify(body)});
+        if(p.status===409||p.status===422){continue;}
+        if(!p.ok)throw new Error('保存に失敗しました ('+p.status+')');
+      }
+      st.entries=m.entries;st.baseW=m.baseW;st.baseD=m.baseD;st.target=m.target;
+      st.dirty={};st.del={};st.cfgDirty=false;save();renderAll();
+      var t=new Date();setSync('同期済み '+t.getHours()+':'+String(t.getMinutes()).padStart(2,'0'));
+      syncing=false;return;
+    }
+    throw new Error('競合が解消できませんでした。もう一度お試しください');
+  }catch(e){setSync('同期失敗: '+e.message+'（記録はこの端末に保存済み）');}
+  syncing=false;
+}
+['ghO','ghR','ghP','ghT'].forEach(function(i){$(i).onchange=function(){ghSave();queueSync(0);};});
+$('syncNow').onclick=function(){ghSave();queueSync(0);};
+document.addEventListener('visibilitychange',function(){if(!document.hidden)queueSync(0);});
+
 window.addEventListener('resize',drawChart);
 if(window.matchMedia)window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',drawChart);
-load();renderAll();
+load();ghLoad();renderAll();queueSync(0);
 })();
 </script>
 </body>
